@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="../shared/tokens.css" />
+    <link rel="stylesheet" href="sidepanel.css" />
+  </head>
+  <body>
+    <div class="panel">
+      <header class="panel__header">
+        <div class="panel__title">
+          <span>Annotations</span>
+          <span id="count" class="panel__count">0</span>
+        </div>
+        <div class="panel__actions">
+          <button id="jira-btn" class="iconbtn" title="Copy all annotations as Jira markdown" aria-label="Copy annotations for Jira">
+            <svg viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <path d="M1 5C1 2.79086 2.79087 1 5 1H13C15.2091 1 17 2.79086 17 5V13C17 15.2091 15.2091 17 13 17H5C2.79087 17 1 15.2091 1 13V5Z" fill="currentColor"/>
+              <mask id="jira-mask" style="mask-type:luminance" maskUnits="userSpaceOnUse" x="3" y="4" width="11" height="11">
+                <path d="M13.8105 4.46332H3.74585V14.606H13.8105V4.46332Z" fill="white"/>
+              </mask>
+              <g mask="url(#jira-mask)">
+                <path d="M6.98274 11.3488H6.08122C4.72152 11.3488 3.74609 10.516 3.74609 9.29648H8.59369C8.84495 9.29648 9.00751 9.47493 9.00751 9.72776V14.6058C7.79561 14.6058 6.98274 13.6242 6.98274 12.256V11.3488ZM9.37701 8.92468H8.47546C7.11576 8.92468 6.14033 8.10672 6.14033 6.8872H10.9879C11.2392 6.8872 11.4165 7.05081 11.4165 7.30363V12.1816C10.2046 12.1816 9.37701 11.2001 9.37701 9.83186V8.92468ZM11.786 6.5154H10.8845C9.52478 6.5154 8.54936 5.68257 8.54936 4.46307H13.397C13.6482 4.46307 13.8108 4.64153 13.8108 4.87948V9.75752C12.5989 9.75752 11.786 8.77595 11.786 7.40774V6.5154Z" fill="#fff"/>
+              </g>
+            </svg>
+          </button>
+          <button id="camera-btn" class="iconbtn" title="Export page to Figma" aria-label="Export to Figma">
+            <svg viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <path d="M6.75 1.5L5.3775 3H3C2.175 3 1.5 3.675 1.5 4.5V13.5C1.5 14.325 2.175 15 3 15H15C15.825 15 16.5 14.325 16.5 13.5V4.5C16.5 3.675 15.825 3 15 3H12.6225L11.25 1.5H6.75ZM9 12.75C6.93 12.75 5.25 11.07 5.25 9C5.25 6.93 6.93 5.25 9 5.25C11.07 5.25 12.75 6.93 12.75 9C12.75 11.07 11.07 12.75 9 12.75Z" fill="currentColor"/>
+              <path d="M9.0001 11.4C10.3256 11.4 11.4001 10.3255 11.4001 8.99998C11.4001 7.67449 10.3256 6.59998 9.0001 6.59998C7.67461 6.59998 6.6001 7.67449 6.6001 8.99998C6.6001 10.3255 7.67461 11.4 9.0001 11.4Z" fill="currentColor"/>
+            </svg>
+          </button>
+          <button id="controls-btn" class="iconbtn" title="Controls" aria-label="Controls">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/>
+              <line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/>
+              <line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/>
+              <line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <div id="warning" class="warning" style="display: none"></div>
+
+      <button id="toggle-btn" class="primary">Start annotating</button>
+
+      <div class="seg" id="bp-seg">
+        <button class="seg__btn" data-bp="desktop">Desktop</button>
+        <button class="seg__btn" data-bp="mobile">Mobile</button>
+      </div>
+
+      <section id="controls" class="controls" style="display: none">
+        <label class="controls__label">Session link</label>
+        <div class="link-row">
+          <input id="session-url" type="text" readonly placeholder="No session yet" />
+          <button id="copy-btn" class="ghost">Copy</button>
+        </div>
+        <div class="controls__row">
+          <button id="export-btn" class="ghost">Export .md</button>
+        </div>
+      </section>
+
+      <div id="list" class="list"></div>
+
+      <div id="empty" class="empty" style="display: none">
+        No annotations yet. Click <b>Start annotating</b>, then click any element on the page.
+      </div>
+
+      <footer class="panel__footer">
+        <span>Show resolved</span>
+        <button id="resolved-toggle" class="switch" role="switch" aria-checked="false">
+          <span class="switch__knob"></span>
+        </button>
+      </footer>
+    </div>
+    <script src="sidepanel.js"></script>
+  </body>
+</html>

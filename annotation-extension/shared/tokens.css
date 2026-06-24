@@ -1,0 +1,39 @@
+/* Design tokens — from Figma "Annotation Ext" file.
+   All names prefixed --ann- to avoid colliding with host page variables. */
+:root {
+  /* Accent */
+  --ann-accent: #f5407f;
+  --ann-accent-subtle: rgba(245, 64, 127, 0.1);
+
+  /* Text */
+  --ann-text-on-accent: #ffffff;
+  --ann-text-primary: rgba(0, 0, 0, 0.9);
+  --ann-text-secondary: rgba(0, 0, 0, 0.5);
+  --ann-text-tertiary: rgba(0, 0, 0, 0.3);
+
+  /* Surfaces */
+  --ann-surface: #ffffff;
+  --ann-bg: #fafaf9;
+
+  /* Borders */
+  --ann-border: #d1d5db;
+  --ann-border-subtle: rgba(0, 0, 0, 0.1);
+  --ann-stroke-inverse: #ffffff;
+
+  /* States */
+  --ann-resolved: #16a34a;
+
+  /* Type */
+  --ann-font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    system-ui, sans-serif;
+
+  /* Radius */
+  --ann-radius-card: 16px;
+  --ann-radius-md: 12px;
+  --ann-radius-sm: 8px;
+  --ann-radius-pill: 100px;
+
+  /* Elevation */
+  --ann-shadow-card: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --ann-shadow-pin: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
