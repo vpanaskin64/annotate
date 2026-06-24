@@ -465,6 +465,10 @@ function buildMarkdown(data) {
 // headings, bold, lists, inline code. Kept compact and paste-friendly.
 function buildJiraMarkdown(data) {
   const out = [`# Annotations (${data.items.length})`, ''];
+  out.push(
+    'To see the current session, extension installation required. [Installation Link](https://github.com/vpanaskin64/annotate)',
+    ''
+  );
   if (data.session_id) out.push(`**Session:** ${buildSessionUrl(data.page_url, data.session_id)}`);
   out.push('', '---', '');
 
@@ -480,12 +484,6 @@ function buildJiraMarkdown(data) {
 
     if (it.title && it.note) out.push(it.note, '');
     else if (!it.title && it.note) { /* note already used as heading */ }
-
-    if (it.element_tag) {
-      let elLine = `**Element:** \`<${it.element_tag.toLowerCase()}>\``;
-      if (it.element_text_preview) elLine += ` — "${it.element_text_preview}"`;
-      out.push(elLine, '');
-    }
 
     if (it.screenshot_url) out.push(`![Screenshot ${it.number}](${it.screenshot_url})`, '');
 

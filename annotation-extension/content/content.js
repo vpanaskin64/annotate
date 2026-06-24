@@ -702,11 +702,26 @@
 
     const editor = document.createElement('div');
     editor.className = 'ann-edit';
+    // Screenshots attach to the annotation, so the capture toggle only shows when
+    // editing the original message (not replies). Off by default; enabling it
+    // captures (or replaces) the screenshot on save. The existing shot is kept if
+    // left off, so plain text edits don't disturb it.
+    const hasShot = msg.isOriginal && !!pins.get(annotationId)?.screenshot_url;
+    const shotControls = msg.isOriginal
+      ? `<div class="ann-shot-controls">
+           <button class="ann-iconbtn ann-shot-toggle" type="button" aria-pressed="false" title="${hasShot ? 'Replace screenshot on save' : 'Attach a screenshot'}">${ICON.screenshot}</button>
+           <label class="ann-shot-full" hidden><input type="checkbox" class="ann-shot-full__cb" /> Full screen</label>
+           ${hasShot ? '<button class="ann-shot-remove" type="button">Remove screenshot</button>' : ''}
+         </div>`
+      : '';
     editor.innerHTML = `
       <textarea class="ann-edit__input"></textarea>
       <div class="ann-edit__actions">
-        <button class="ann-btn ann-btn--ghost ann-edit__cancel">Cancel</button>
-        <button class="ann-btn ann-btn--primary ann-edit__save">Save</button>
+        ${shotControls}
+        <div class="ann-compose-actions__right">
+          <button class="ann-btn ann-btn--ghost ann-edit__cancel">Cancel</button>
+          <button class="ann-btn ann-btn--primary ann-edit__save">Save</button>
+        </div>
       </div>`;
     const ta = editor.querySelector('textarea');
     ta.value = msg.body;
@@ -718,6 +733,45 @@
     }
     ta.focus();
     ta.setSelectionRange(ta.value.length, ta.value.length);
+
+    // Optional screenshot capture/removal when editing the original message.
+    let wantShot = false;
+    let wantRemove = false;
+    const shotToggle = editor.querySelector('.ann-shot-toggle');
+    const fullWrap = editor.querySelector('.ann-shot-full');
+    const fullCb = editor.querySelector('.ann-shot-full__cb');
+    const removeBtn = editor.querySelector('.ann-shot-remove');
+    if (shotToggle) {
+      shotToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        wantShot = !wantShot;
+        if (wantShot) {
+          wantRemove = false; // capturing a new one cancels removal
+          removeBtn?.classList.remove('is-armed');
+        }
+        shotToggle.classList.toggle('is-on', wantShot);
+        shotToggle.setAttribute('aria-pressed', String(wantShot));
+        shotToggle.title = wantShot ? 'Screenshot will be attached on save' : 'Attach a screenshot';
+        fullWrap.hidden = !wantShot;
+        if (!wantShot) fullCb.checked = false;
+      });
+    }
+    if (removeBtn) {
+      removeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        wantRemove = !wantRemove;
+        removeBtn.classList.toggle('is-armed', wantRemove);
+        removeBtn.textContent = wantRemove ? 'Screenshot will be removed' : 'Remove screenshot';
+        if (wantRemove && wantShot) {
+          // Removing cancels a pending capture.
+          wantShot = false;
+          shotToggle.classList.remove('is-on');
+          shotToggle.setAttribute('aria-pressed', 'false');
+          fullWrap.hidden = true;
+          fullCb.checked = false;
+        }
+      });
+    }
 
     editor.querySelector('.ann-edit__cancel').addEventListener('click', (e) => {
       e.stopPropagation();
@@ -733,8 +787,17 @@
       save.textContent = 'Saving…';
       let r;
       if (msg.isOriginal) {
-        r = await sendMessage({ type: 'UPDATE_ANNOTATION', annotation_id: annotationId, fields: { note: text } });
-        if (r.ok) pins.get(annotationId).note = text;
+        const fields = { note: text };
+        if (wantRemove) fields.screenshot_url = null;
+        r = await sendMessage({ type: 'UPDATE_ANNOTATION', annotation_id: annotationId, fields });
+        if (r.ok) {
+          pins.get(annotationId).note = text;
+          if (wantRemove) {
+            pins.get(annotationId).screenshot_url = null;
+            // Hard-delete the file from Storage so nothing is left orphaned.
+            sendMessage({ type: 'DELETE_SHOT', session_id: sessionId, annotation_id: annotationId });
+          }
+        }
       } else {
         r = await sendMessage({ type: 'UPDATE_COMMENT', comment_id: msg.id, fields: { body: text } });
         if (r.ok) {
@@ -749,6 +812,7 @@
       }
       openThreadCard(annotationId, true);
       notifyPanel();
+      if (msg.isOriginal && wantShot) captureShot(annotationId, { fullscreen: fullCb.checked });
     });
   }
 
@@ -1941,11 +2005,24 @@
     true
   );
 
-  document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape') return;
-    if (openCard) closeCard();
-    else if (active) setActive(false); // setActive broadcasts MODE_CHANGED
-  });
+  // Capture at the window phase so we get Esc before the host page (SPAs/modals
+  // often swallow it). Only consume it when we actually act on it.
+  window.addEventListener(
+    'keydown',
+    (e) => {
+      if (e.key !== 'Escape') return;
+      if (openCard) {
+        closeCard();
+        e.stopPropagation();
+        e.preventDefault();
+      } else if (active) {
+        setActive(false); // setActive broadcasts MODE_CHANGED
+        e.stopPropagation();
+        e.preventDefault();
+      }
+    },
+    true
+  );
 
   window.addEventListener('scroll', repositionAll, true);
   window.addEventListener('resize', repositionAll);

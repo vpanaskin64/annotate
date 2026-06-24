@@ -300,6 +300,17 @@ async function getSitePages(origin) {
   return { pages };
 }
 
+// Delete a screenshot object from Storage (used when a user removes a shot).
+async function deleteShot(sessionId, annotationId) {
+  const path = `${sessionId}/${annotationId}.png`;
+  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/annotation-shots/${path}`, {
+    method: 'DELETE',
+    headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+  });
+  // 404 = already gone; treat as success.
+  if (!res.ok && res.status !== 404) throw new Error(`delete shot ${res.status}: ${await res.text()}`);
+}
+
 // Crop a PNG data URL to a device-pixel rect using OffscreenCanvas.
 async function cropPngDataUrl(dataUrl, crop) {
   const blob = await (await fetch(dataUrl)).blob();
@@ -584,6 +595,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           const windowId = _sender.tab ? _sender.tab.windowId : msg.window_id;
           const url = await captureAndUpload(windowId, msg.session_id, msg.annotation_id, msg.crop);
           sendResponse({ ok: true, screenshot_url: url });
+          break;
+        }
+        case 'DELETE_SHOT': {
+          await deleteShot(msg.session_id, msg.annotation_id);
+          sendResponse({ ok: true });
           break;
         }
         case 'FETCH_IMAGE': {
