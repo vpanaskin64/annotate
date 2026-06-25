@@ -93,13 +93,10 @@ body.ann-capturing .ann-ui {
 body.ann-capturing .ann-hover {
   outline: none !important;
 }
-/* During a per-annotation capture, show ONLY the pin being captured so other
-   pins' numbers aren't baked into the screenshot. */
+/* During a per-annotation capture, hide ALL pins (including the one being
+   captured) so no markers are baked into the screenshot. */
 body.ann-capturing .ann-pin {
   visibility: hidden !important;
-}
-body.ann-capturing .ann-pin.ann-pin--capturing {
-  visibility: visible !important;
 }
 /* Full-page export: hide ALL annotation UI (incl. pins) so the screenshot is
    clean — numbered markers are baked onto the image afterward. */
@@ -299,6 +296,11 @@ body.ann-capturing .ann-pin--selected .ann-pin__circle {
   color: var(--ann-text-primary);
   white-space: pre-wrap;
   word-break: break-word;
+}
+.ann-link {
+  color: var(--ann-accent);
+  text-decoration: underline;
+  word-break: break-all;
 }
 .ann-msg__tag {
   font-size: 11px;
@@ -601,10 +603,18 @@ body.ann-capturing .ann-pin--selected .ann-pin__circle {
   background: none;
   padding: 4px 2px;
   font-family: var(--ann-font);
-  font-size: 12px;
+  font-size: 11px;
+  line-height: 1.2;
+  text-align: left;
+  white-space: nowrap;
   color: var(--ann-text-secondary);
   cursor: pointer;
   text-decoration: underline;
+}
+/* Armed label ("Screenshot will be removed") is longer — let it wrap to 2 lines. */
+.ann-shot-remove.is-armed {
+  white-space: normal;
+  max-width: 96px;
 }
 .ann-shot-remove:hover {
   color: #dc2626;

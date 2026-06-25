@@ -423,22 +423,25 @@ jiraBtn.addEventListener('click', async () => {
   }
   if (copied) {
     showWarning('');
-    flashIconbtn(jiraBtn, `Copied ${data.items.length} annotation${data.items.length === 1 ? '' : 's'} for Jira`);
+    showToast(`Copied ${data.items.length} annotation${data.items.length === 1 ? '' : 's'} to clipboard`);
   } else {
     showWarning('Could not copy to clipboard.');
   }
 });
 
-// Briefly reflect a success message in the button's tooltip.
-function flashIconbtn(btn, msg) {
-  const title = btn.dataset.title || btn.title;
-  btn.dataset.title = title;
-  btn.title = msg;
-  btn.classList.add('is-ok');
-  setTimeout(() => {
-    btn.title = btn.dataset.title;
-    btn.classList.remove('is-ok');
-  }, 1600);
+let toastTimer = null;
+function showToast(msg) {
+  let toast = el('toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'toast';
+    toast.className = 'toast';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = msg;
+  toast.classList.add('is-visible');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove('is-visible'), 2200);
 }
 
 function buildMarkdown(data) {

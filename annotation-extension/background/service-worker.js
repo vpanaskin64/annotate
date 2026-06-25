@@ -300,9 +300,15 @@ async function getSitePages(origin) {
   return { pages };
 }
 
-// Delete a screenshot object from Storage (used when a user removes a shot).
-async function deleteShot(sessionId, annotationId) {
-  const path = `${sessionId}/${annotationId}.png`;
+// Extract the storage object path from a public screenshot URL.
+function shotPathFromUrl(url) {
+  const m = /\/annotation-shots\/([^?]+)/.exec(url || '');
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+// Delete a screenshot object from Storage by its object path.
+async function deleteShotPath(path) {
+  if (!path) return;
   const res = await fetch(`${SUPABASE_URL}/storage/v1/object/annotation-shots/${path}`, {
     method: 'DELETE',
     headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
@@ -326,8 +332,11 @@ async function cropPngDataUrl(dataUrl, crop) {
 }
 
 // Capture the visible tab and upload the PNG to Supabase Storage. When `crop`
-// (a device-pixel rect) is given, only that region is saved.
-async function captureAndUpload(windowId, sessionId, annotationId, crop) {
+// (a device-pixel rect) is given, only that region is saved. Each capture goes
+// to a UNIQUE path (…-<timestamp>.png) so a re-capture never collides with a
+// previously deleted object's CDN-cached path; the previous file (`prevUrl`) is
+// deleted afterward so nothing is orphaned.
+async function captureAndUpload(windowId, sessionId, annotationId, crop, prevUrl) {
   const dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: 'png' });
   let bytes;
   if (crop) {
@@ -341,7 +350,7 @@ async function captureAndUpload(windowId, sessionId, annotationId, crop) {
     const base64 = dataUrl.split(',')[1];
     bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   }
-  const path = `${sessionId}/${annotationId}.png`;
+  const path = `${sessionId}/${annotationId}-${Date.now()}.png`;
   const upRes = await fetch(`${SUPABASE_URL}/storage/v1/object/annotation-shots/${path}`, {
     method: 'POST',
     headers: {
@@ -355,6 +364,9 @@ async function captureAndUpload(windowId, sessionId, annotationId, crop) {
   if (!upRes.ok) throw new Error(`upload ${upRes.status}: ${await upRes.text()}`);
   const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/annotation-shots/${path}`;
   await updateAnnotationShot(annotationId, publicUrl);
+  // Clean up the file we just replaced (best-effort; don't fail the capture).
+  const prevPath = shotPathFromUrl(prevUrl);
+  if (prevPath && prevPath !== path) deleteShotPath(prevPath).catch(() => {});
   return publicUrl;
 }
 
@@ -593,12 +605,18 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         }
         case 'CAPTURE_SHOT': {
           const windowId = _sender.tab ? _sender.tab.windowId : msg.window_id;
-          const url = await captureAndUpload(windowId, msg.session_id, msg.annotation_id, msg.crop);
+          const url = await captureAndUpload(
+            windowId,
+            msg.session_id,
+            msg.annotation_id,
+            msg.crop,
+            msg.prev_url
+          );
           sendResponse({ ok: true, screenshot_url: url });
           break;
         }
         case 'DELETE_SHOT': {
-          await deleteShot(msg.session_id, msg.annotation_id);
+          await deleteShotPath(shotPathFromUrl(msg.url));
           sendResponse({ ok: true });
           break;
         }

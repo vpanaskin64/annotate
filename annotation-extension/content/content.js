@@ -625,7 +625,7 @@
 
     const body = document.createElement('div');
     body.className = 'ann-msg__body';
-    body.textContent = msg.body;
+    body.innerHTML = linkify(msg.body);
     item.appendChild(body);
 
     // Screenshot thumbnail on the original message (shown only when one exists)
@@ -791,11 +791,13 @@
         if (wantRemove) fields.screenshot_url = null;
         r = await sendMessage({ type: 'UPDATE_ANNOTATION', annotation_id: annotationId, fields });
         if (r.ok) {
-          pins.get(annotationId).note = text;
+          const anno = pins.get(annotationId);
+          anno.note = text;
           if (wantRemove) {
-            pins.get(annotationId).screenshot_url = null;
+            const oldUrl = anno.screenshot_url;
+            anno.screenshot_url = null;
             // Hard-delete the file from Storage so nothing is left orphaned.
-            sendMessage({ type: 'DELETE_SHOT', session_id: sessionId, annotation_id: annotationId });
+            sendMessage({ type: 'DELETE_SHOT', url: oldUrl });
           }
         }
       } else {
@@ -1058,13 +1060,17 @@
       );
     ta.focus();
 
-    // Screenshot opt-in: off by default; user toggles it on to attach a capture.
-    // Default captures only the annotated element's area; the "Full screen"
-    // checkbox (shown only when the screenshot is enabled) captures the viewport.
-    let wantShot = false;
+    // Screenshot ON by default (focus mode): captures the annotated element's
+    // area. The "Full screen" checkbox (shown while enabled) captures the
+    // viewport. User can toggle the screenshot off entirely.
+    let wantShot = true;
     const shotToggle = card.querySelector('.ann-shot-toggle');
     const fullWrap = card.querySelector('.ann-shot-full');
     const fullCb = card.querySelector('.ann-shot-full__cb');
+    shotToggle.classList.add('is-on');
+    shotToggle.setAttribute('aria-pressed', 'true');
+    shotToggle.title = 'Screenshot will be attached';
+    fullWrap.hidden = false;
     shotToggle.addEventListener('click', (e) => {
       e.stopPropagation();
       wantShot = !wantShot;
@@ -1154,6 +1160,15 @@
       '"': '&quot;',
       "'": '&#39;',
     }[c]));
+  }
+  // Escape, then turn bare URLs into clickable links (opens in a new tab).
+  function linkify(text) {
+    return escapeHtml(text).replace(/(https?:\/\/[^\s<]+)/g, (m) => {
+      const trail = m.match(/[.,;:!?)\]}'"]+$/); // don't swallow trailing punctuation
+      const url = trail ? m.slice(0, -trail[0].length) : m;
+      const tail = trail ? trail[0] : '';
+      return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="ann-link">${url}</a>${tail}`;
+    });
   }
   async function setAuthor(name) {
     currentAuthor = name;
@@ -1523,7 +1538,7 @@
         await new Promise((r) => setTimeout(r, 200));
         const rect = el.getBoundingClientRect();
         const dpr = window.devicePixelRatio || 1;
-        const pad = 8;
+        const pad = 48; // safe area so the pin (at the element's corner) isn't cut off
         const left = Math.max(0, rect.left - pad);
         const top = Math.max(0, rect.top - pad);
         const right = Math.min(window.innerWidth, rect.right + pad);
@@ -1539,10 +1554,9 @@
       }
     }
 
-    // Hide our overlays + element highlight for the capture, and show ONLY this
-    // annotation's pin (so other pins' numbers aren't baked into the shot).
+    // Hide all our overlays + pins (including this annotation's) for the capture
+    // so no markers are baked into the screenshot.
     document.body.classList.add('ann-capturing');
-    d.pinEl.classList.add('ann-pin--capturing');
     if (openCard) openCard.el.style.visibility = 'hidden';
     await new Promise((r) => setTimeout(r, 120));
     const resp = await sendMessage({
@@ -1550,9 +1564,9 @@
       session_id: sessionId,
       annotation_id: annotationId,
       crop,
+      prev_url: d.screenshot_url || null, // replace cleanly, no orphaned file
     });
     document.body.classList.remove('ann-capturing');
-    d.pinEl.classList.remove('ann-pin--capturing');
     if (openCard) openCard.el.style.visibility = '';
     if (resp.ok) {
       d.screenshot_url = resp.screenshot_url;
@@ -2011,7 +2025,12 @@
     'keydown',
     (e) => {
       if (e.key !== 'Escape') return;
-      if (openCard) {
+      const zoom = document.querySelector('.ann-zoom');
+      if (zoom) {
+        zoom.remove();
+        e.stopPropagation();
+        e.preventDefault();
+      } else if (openCard) {
         closeCard();
         e.stopPropagation();
         e.preventDefault();
