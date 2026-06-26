@@ -11,6 +11,7 @@
   const POLL_MS = 10000; // how often to pull others' changes while the tab is visible
 
   let active = false;
+  let frozen = false; // "Freeze" mode: hold a transient popover/panel open so it can be annotated
   let sessionId = null;
   let hoverEl = null;
   let currentAuthor = '';
@@ -50,6 +51,8 @@
     // assets/Annotation/Annotation/screenshot.svg (framed-image icon)
     screenshot:
       '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 6.5H13.01M4 11.5L6.644 8.856a1.4 1.4 0 0 1 1.712 0L12 12.5M11 11.5l1.644-1.644a1.4 1.4 0 0 1 1.712 0L16 11.5M2 6.5V4.5a2 2 0 0 1 2-2H6M2 14.5v2a2 2 0 0 0 2 2H6M14 2.5h2a2 2 0 0 1 2 2V6.5M14 18.5h2a2 2 0 0 0 2-2V14.5"/></svg>',
+    image:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.6"/><path d="M21 15l-5-5L5 21"/></svg>',
   };
 
   // ---------- utilities ----------
@@ -350,17 +353,46 @@
 
   // ---------- toolbar (mode indicator) ----------
   let toolbarEl = null;
+  function toolbarText() {
+    return frozen
+      ? 'Frozen — click anything to pin · Freeze again to unlock'
+      : 'Click an element to annotate · Esc to exit';
+  }
   function showToolbar() {
     if (toolbarEl) return;
     toolbarEl = document.createElement('div');
     toolbarEl.className = 'ann-toolbar ann-ui';
     toolbarEl.innerHTML =
-      '<span class="ann-toolbar__dot"></span><span>Click an element to annotate · Esc to exit</span>';
+      '<span class="ann-toolbar__dot"></span>' +
+      `<span class="ann-toolbar__text">${toolbarText()}</span>` +
+      '<button type="button" class="ann-toolbar__freeze" tabindex="-1" ' +
+      'title="Hold the current popover, tooltip, menu or panel open so you can pin it">' +
+      'Freeze</button>';
     document.body.appendChild(toolbarEl);
+    // Toggle on click. (Focus is preserved by a capture-phase handler below, so
+    // pressing this never blurs — and thus never closes — a focus-driven panel.)
+    toolbarEl.querySelector('.ann-toolbar__freeze').addEventListener('click', (e) => {
+      e.stopPropagation();
+      setFrozen(!frozen);
+    });
+  }
+  function updateToolbar() {
+    if (!toolbarEl) return;
+    const t = toolbarEl.querySelector('.ann-toolbar__text');
+    if (t) t.textContent = toolbarText();
+    toolbarEl
+      .querySelector('.ann-toolbar__freeze')
+      ?.classList.toggle('ann-toolbar__freeze--on', frozen);
   }
   function hideToolbar() {
     toolbarEl?.remove();
     toolbarEl = null;
+  }
+  function setFrozen(on) {
+    if (frozen === on) return;
+    frozen = on;
+    document.body.classList.toggle('ann-frozen', on);
+    updateToolbar();
   }
 
   // ---------- hover highlight ----------
@@ -641,6 +673,34 @@
       });
       item.appendChild(thumb);
     }
+
+    // Reference section (how it should look) — image and/or note.
+    if (msg.isOriginal && d && (d.reference_image_url || d.reference_note)) {
+      const ref = document.createElement('div');
+      ref.className = 'ann-msg__ref';
+      const label = document.createElement('div');
+      label.className = 'ann-msg__ref-label';
+      label.textContent = 'Reference';
+      ref.appendChild(label);
+      if (d.reference_image_url) {
+        const fig = document.createElement('div');
+        fig.className = 'ann-msg__ref-img';
+        fig.innerHTML = `<img src="${d.reference_image_url}" alt="Reference">`;
+        fig.title = 'Click to zoom';
+        fig.addEventListener('click', (e) => {
+          e.stopPropagation();
+          openZoom(d.reference_image_url);
+        });
+        ref.appendChild(fig);
+      }
+      if (d.reference_note) {
+        const note = document.createElement('div');
+        note.className = 'ann-msg__ref-note';
+        note.innerHTML = linkify(d.reference_note);
+        ref.appendChild(note);
+      }
+      item.appendChild(ref);
+    }
     return item;
   }
 
@@ -716,6 +776,7 @@
       : '';
     editor.innerHTML = `
       <textarea class="ann-edit__input"></textarea>
+      ${msg.isOriginal ? referenceFieldHtml(true) : ''}
       <div class="ann-edit__actions">
         ${shotControls}
         <div class="ann-compose-actions__right">
@@ -723,6 +784,9 @@
           <button class="ann-btn ann-btn--primary ann-edit__save">Save</button>
         </div>
       </div>`;
+    const refField = msg.isOriginal
+      ? setupReferenceField(editor, pins.get(annotationId) || {})
+      : null;
     const ta = editor.querySelector('textarea');
     ta.value = msg.body;
     if (body) {
@@ -733,6 +797,15 @@
     }
     ta.focus();
     ta.setSelectionRange(ta.value.length, ta.value.length);
+
+    // Hide the reply composer while editing — the card is in edit mode, not
+    // reply mode. Restored if the edit is cancelled or fails (a successful save
+    // rebuilds the whole card via openThreadCard, which brings it back).
+    const composer = openCard?.el?.querySelector('.ann-composer');
+    if (composer) composer.style.display = 'none';
+    const restoreComposer = () => {
+      if (composer) composer.style.display = '';
+    };
 
     // Optional screenshot capture/removal when editing the original message.
     let wantShot = false;
@@ -777,6 +850,7 @@
       e.stopPropagation();
       editor.remove();
       if (body) body.style.display = '';
+      restoreComposer();
     });
     editor.querySelector('.ann-edit__save').addEventListener('click', async (e) => {
       e.stopPropagation();
@@ -786,18 +860,34 @@
       save.disabled = true;
       save.textContent = 'Saving…';
       let r;
+      let refToUpload = null;
+      let refPrevUrl = null;
       if (msg.isOriginal) {
-        const fields = { note: text };
+        const anno = pins.get(annotationId);
+        const refState = refField.getState();
+        const oldRefUrl = anno?.reference_image_url || null;
+        const fields = { note: text, reference_note: refState.note };
         if (wantRemove) fields.screenshot_url = null;
+        // Clearing the reference image (and not replacing it) nulls the column.
+        if (refState.removed && !refState.picked) fields.reference_image_url = null;
         r = await sendMessage({ type: 'UPDATE_ANNOTATION', annotation_id: annotationId, fields });
         if (r.ok) {
-          const anno = pins.get(annotationId);
           anno.note = text;
+          anno.reference_note = refState.note;
           if (wantRemove) {
             const oldUrl = anno.screenshot_url;
             anno.screenshot_url = null;
             // Hard-delete the file from Storage so nothing is left orphaned.
             sendMessage({ type: 'DELETE_SHOT', url: oldUrl });
+          }
+          if (refState.removed && !refState.picked) {
+            anno.reference_image_url = null;
+            if (oldRefUrl) sendMessage({ type: 'DELETE_SHOT', url: oldRefUrl });
+          }
+          // A newly picked image is uploaded after the row update (replaces old).
+          if (refState.picked) {
+            refToUpload = refState.picked;
+            refPrevUrl = oldRefUrl;
           }
         }
       } else {
@@ -810,10 +900,12 @@
       if (!r.ok) {
         save.disabled = false;
         save.textContent = 'Save';
+        restoreComposer();
         return alert(`Edit failed: ${r.error}`);
       }
       openThreadCard(annotationId, true);
       notifyPanel();
+      if (refToUpload) uploadReference(annotationId, refToUpload, refPrevUrl);
       if (msg.isOriginal && wantShot) captureShot(annotationId, { fullscreen: fullCb.checked });
     });
   }
@@ -1031,6 +1123,7 @@
         <input class="ann-composer__title" placeholder="Title">
         <textarea class="ann-composer__input" rows="2" placeholder="Description — what needs to change?"></textarea>
         ${currentAuthor ? '' : '<input class="ann-composer__name" placeholder="Your name" required>'}
+        ${referenceFieldHtml(false)}
         <div class="ann-compose-actions">
           <div class="ann-shot-controls">
             <button class="ann-iconbtn ann-shot-toggle" type="button" aria-pressed="false" title="Attach a screenshot">${ICON.screenshot}</button>
@@ -1058,6 +1151,7 @@
       nameInput.addEventListener('input', () =>
         nameInput.classList.remove('ann-input--error')
       );
+    const refField = setupReferenceField(card);
     ta.focus();
 
     // Screenshot ON by default (focus mode): captures the annotated element's
@@ -1106,6 +1200,7 @@
         btn.textContent = 'Add';
         return alert('Could not create session. Check Supabase config.');
       }
+      const refState = refField.getState();
       const fields = {
         type: 'ADD_ANNOTATION',
         selector,
@@ -1118,6 +1213,7 @@
         position_y: 0,
         author: currentAuthor || null,
         breakpoint: activeBp(),
+        reference_note: refState.note,
       };
       let r = await sendMessage({ ...fields, session_id: sessionId });
       // The cached session may have been deleted (e.g. DB wiped). Recreate it
@@ -1135,6 +1231,7 @@
       renderPin(r.annotation);
       notifyPanel();
       openThreadCard(r.annotation.id);
+      if (refState.picked) uploadReference(r.annotation.id, refState.picked);
       if (wantShot) captureShot(r.annotation.id, { fullscreen: fullCb.checked });
     });
   }
@@ -1151,6 +1248,158 @@
       ta.style.height = `${Math.min(ta.scrollHeight, 120)}px`;
     };
     ta.addEventListener('input', fn);
+  }
+
+  // ---------- reference field (image of how it SHOULD look + a note) ----------
+  function fileToDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(fr.result);
+      fr.onerror = () => reject(fr.error || new Error('read failed'));
+      fr.readAsDataURL(file);
+    });
+  }
+
+  // Markup for the reference block. `compact` trims spacing for the inline editor.
+  function referenceFieldHtml(compact) {
+    return `
+      <div class="ann-ref${compact ? ' ann-ref--compact' : ''}">
+        <div class="ann-ref__label">Reference — how it should look</div>
+        <input type="file" accept="image/*" class="ann-ref__file" hidden>
+        <button type="button" class="ann-ref__drop">
+          <span class="ann-ref__empty">${ICON.image}<span>Upload or drop reference image</span></span>
+          <span class="ann-ref__preview" hidden>
+            <img class="ann-ref__img" alt="Reference">
+            <span class="ann-ref__remove" role="button" tabindex="0" title="Remove image">${ICON.close}</span>
+          </span>
+        </button>
+        <textarea class="ann-ref__note" rows="2" placeholder="Reference notes — describe the expected result"></textarea>
+      </div>`;
+  }
+
+  // Wire a reference block inside `scope`. `initial` may carry an existing
+  // reference_image_url / reference_note. Returns getState() for save handlers.
+  function setupReferenceField(scope, initial = {}) {
+    const drop = scope.querySelector('.ann-ref__drop');
+    const fileInput = scope.querySelector('.ann-ref__file');
+    const empty = scope.querySelector('.ann-ref__empty');
+    const preview = scope.querySelector('.ann-ref__preview');
+    const img = scope.querySelector('.ann-ref__img');
+    const removeBtn = scope.querySelector('.ann-ref__remove');
+    const note = scope.querySelector('.ann-ref__note');
+    const existingUrl = initial.reference_image_url || null;
+
+    let picked = null; // newly chosen file: { base64, type, ext, dataUrl }
+    let removed = false; // existing image cleared
+
+    function showImage(src) {
+      img.src = src;
+      preview.hidden = false;
+      empty.hidden = true;
+    }
+    function showEmpty() {
+      preview.hidden = true;
+      empty.hidden = false;
+      img.removeAttribute('src');
+    }
+    if (note && initial.reference_note) note.value = initial.reference_note;
+    if (existingUrl) showImage(existingUrl);
+    else showEmpty();
+
+    async function acceptFile(file) {
+      if (!file) return;
+      if (!/^image\//.test(file.type)) return alert('Please choose an image file.');
+      if (file.size > 8 * 1024 * 1024) return alert('Image is too large (max 8 MB).');
+      const dataUrl = await fileToDataUrl(file);
+      picked = {
+        dataUrl,
+        base64: dataUrl.split(',')[1],
+        type: file.type,
+        ext: (file.name.split('.').pop() || 'png').toLowerCase(),
+      };
+      removed = false;
+      showImage(dataUrl);
+    }
+
+    drop.addEventListener('click', (e) => {
+      if (e.target.closest('.ann-ref__remove')) return; // remove handled below
+      fileInput.click();
+    });
+    fileInput.addEventListener('change', () => {
+      const file = fileInput.files && fileInput.files[0];
+      fileInput.value = '';
+      acceptFile(file);
+    });
+
+    // Drag & drop. preventDefault on dragover is required for `drop` to fire;
+    // dragleave only un-highlights when the pointer actually leaves the zone.
+    ['dragenter', 'dragover'].forEach((t) =>
+      drop.addEventListener(t, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        drop.classList.add('is-dragover');
+      })
+    );
+    ['dragleave', 'dragend'].forEach((t) =>
+      drop.addEventListener(t, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.type === 'dragleave' && drop.contains(e.relatedTarget)) return;
+        drop.classList.remove('is-dragover');
+      })
+    );
+    drop.addEventListener('drop', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      drop.classList.remove('is-dragover');
+      acceptFile(e.dataTransfer?.files?.[0]);
+    });
+    const doRemove = (e) => {
+      e.stopPropagation();
+      picked = null;
+      removed = true;
+      showEmpty();
+    };
+    removeBtn.addEventListener('click', doRemove);
+    removeBtn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') doRemove(e);
+    });
+
+    return {
+      getState() {
+        return {
+          note: note.value.trim() || null,
+          picked,
+          removed,
+          hadImage: !!existingUrl,
+        };
+      },
+    };
+  }
+
+  // Upload a chosen reference image for an annotation (after it exists). Updates
+  // the in-memory pin and refreshes the open card. `prevUrl` is cleaned up by bg.
+  async function uploadReference(annotationId, picked, prevUrl = null) {
+    if (!sessionId || !picked) return { ok: false, error: 'no image' };
+    const resp = await sendMessage({
+      type: 'UPLOAD_REFERENCE',
+      session_id: sessionId,
+      annotation_id: annotationId,
+      base64: picked.base64,
+      content_type: picked.type,
+      ext: picked.ext,
+      prev_url: prevUrl,
+    });
+    if (resp.ok) {
+      const d = pins.get(annotationId);
+      if (d) d.reference_image_url = resp.reference_image_url;
+      if (openCard && !openCard.compose && openCard.annotationId === annotationId)
+        openThreadCard(annotationId, true);
+      notifyPanel();
+    } else {
+      console.warn('[Annotate] reference upload failed:', resp.error);
+    }
+    return resp;
   }
   function escapeHtml(s) {
     return (s || '').replace(/[&<>"']/g, (c) => ({
@@ -1815,9 +2064,9 @@
   // card survives. Assumes isBusy() was already checked by the caller.
   // Per-thread fingerprint, to detect whether the open card needs re-rendering.
   function annSig(a, comments) {
-    return `${a.note}:${a.resolved ? 1 : 0}:${(comments || [])
-      .map((c) => `${c.id}:${c.body}`)
-      .join(',')}`;
+    return `${a.note}:${a.resolved ? 1 : 0}:${a.reference_image_url || ''}:${
+      a.reference_note || ''
+    }:${(comments || []).map((c) => `${c.id}:${c.body}`).join(',')}`;
   }
 
   function applyRemoteData(r) {
@@ -1855,6 +2104,8 @@
           resolved: a.resolved,
           breakpoint: a.breakpoint,
           screenshot_url: a.screenshot_url,
+          reference_image_url: a.reference_image_url,
+          reference_note: a.reference_note,
           author: a.author,
           comments,
         });
@@ -1928,6 +2179,7 @@
     document.body.classList.toggle('ann-mode', on);
     if (on) showToolbar();
     else {
+      setFrozen(false);
       clearHover();
       hideToolbar();
     }
@@ -1971,6 +2223,21 @@
     return isOwnUi(e.target);
   }
 
+  // Pressing the Freeze button must not blur the page. If focus left a search
+  // input/panel, the page would fire blur/focusout and close it — the very thing
+  // Freeze exists to prevent. preventDefault on the press keeps page focus put;
+  // the button still receives its click (so the toggle fires). Runs before the
+  // shield below so it isn't swallowed.
+  ['pointerdown', 'mousedown'].forEach((type) =>
+    window.addEventListener(
+      type,
+      (e) => {
+        if (e.target?.closest?.('.ann-toolbar__freeze')) e.preventDefault();
+      },
+      true
+    )
+  );
+
   // Shield our cards from the host page's focus traps and outside-click closers,
   // and remember when a pointer interaction starts on our UI — so the resulting
   // click is never mistaken for a page click that should spawn a new pin (even
@@ -1986,7 +2253,34 @@
           e.stopPropagation();
         } else {
           pointerStartedOnOwnUi = false;
+          // While frozen, never let the page see the outside press that would
+          // close its popover/menu. The pin is still placed on the click below.
+          if (frozen) e.stopImmediatePropagation();
         }
+      },
+      true
+    )
+  );
+
+  // While frozen, also swallow the focus- and pointer-leave events the page uses
+  // to dismiss transient UI (search panels closing on blur, tooltips closing on
+  // mouseleave). Our own UI is never affected. mouseover/enter are left alone so
+  // the hover highlight keeps tracking. This is the JS-popover path; pure CSS
+  // :hover tooltips need the CDP forcePseudoState approach (separate change).
+  [
+    'focusout',
+    'blur',
+    'mouseout',
+    'mouseleave',
+    'pointerout',
+    'pointerleave',
+    'mouseup',
+    'pointerup',
+  ].forEach((type) =>
+    window.addEventListener(
+      type,
+      (e) => {
+        if (frozen && !eventOnOwnUi(e)) e.stopImmediatePropagation();
       },
       true
     )
@@ -1995,6 +2289,7 @@
     'focusin',
     (e) => {
       if (eventOnOwnUi(e)) e.stopPropagation();
+      else if (frozen) e.stopImmediatePropagation();
     },
     true
   );
@@ -2032,6 +2327,10 @@
         e.preventDefault();
       } else if (openCard) {
         closeCard();
+        e.stopPropagation();
+        e.preventDefault();
+      } else if (frozen) {
+        setFrozen(false); // step out of freeze first; keep annotation mode on
         e.stopPropagation();
         e.preventDefault();
       } else if (active) {
@@ -2127,6 +2426,8 @@
                 resolved: !!d.resolved,
                 breakpoint: d.breakpoint || null,
                 screenshot_url: d.screenshot_url || null,
+                reference_image_url: d.reference_image_url || null,
+                reference_note: d.reference_note || null,
                 replies: (d.comments || []).map((c) => ({
                   author: c.author,
                   body: c.body,

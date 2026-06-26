@@ -458,6 +458,8 @@ function buildMarkdown(data) {
     if (it.element_tag) out.push(`- Element: \`<${it.element_tag.toLowerCase()}>\``);
     if (it.element_text_preview) out.push(`- Text: "${it.element_text_preview}"`);
     out.push(`- Selector: \`${it.selector}\``);
+    if (it.reference_note) out.push(`- Reference: ${it.reference_note}`);
+    if (it.reference_image_url) out.push(`- Reference image: ${it.reference_image_url}`);
     for (const r of it.replies || []) out.push(`  - **${r.author || 'Anonymous'}:** ${r.body}`);
     out.push('');
   }
@@ -489,6 +491,12 @@ function buildJiraMarkdown(data) {
     else if (!it.title && it.note) { /* note already used as heading */ }
 
     if (it.screenshot_url) out.push(`![Screenshot ${it.number}](${it.screenshot_url})`, '');
+
+    if (it.reference_note || it.reference_image_url) {
+      out.push('**Reference — how it should look:**', '');
+      if (it.reference_note) out.push(it.reference_note, '');
+      if (it.reference_image_url) out.push(`![Reference ${it.number}](${it.reference_image_url})`, '');
+    }
 
     if (it.replies && it.replies.length) {
       out.push(`**Replies (${it.replies.length}):**`);

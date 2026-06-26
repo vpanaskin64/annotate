@@ -17,7 +17,7 @@ const HEADERS = {
 const ANNOTATION_COLS_BASE =
   'id,session_id,selector,note,element_tag,element_text_preview,position_x,position_y,author,resolved,breakpoint,screenshot_url,created_at';
 // Optional columns added by later migrations; reads fall back to BASE if absent.
-const ANNOTATION_COLS = `${ANNOTATION_COLS_BASE},anchor,title`;
+const ANNOTATION_COLS = `${ANNOTATION_COLS_BASE},anchor,title,reference_image_url,reference_note`;
 
 // PostgREST reports an absent column as "Could not find the 'X' column ...".
 // Returns the column name, or null.
@@ -370,6 +370,31 @@ async function captureAndUpload(windowId, sessionId, annotationId, crop, prevUrl
   return publicUrl;
 }
 
+// Upload a user-chosen reference image (base64) to the annotation-shots bucket
+// and store its public URL on the annotation. Mirrors captureAndUpload: unique
+// path per upload, previous file cleaned up afterward so nothing is orphaned.
+async function uploadReference(sessionId, annotationId, base64, contentType, ext, prevUrl) {
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const safeExt = (ext || 'png').replace(/[^a-z0-9]/gi, '').slice(0, 5) || 'png';
+  const path = `${sessionId}/${annotationId}-ref-${Date.now()}.${safeExt}`;
+  const upRes = await fetch(`${SUPABASE_URL}/storage/v1/object/annotation-shots/${path}`, {
+    method: 'POST',
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      'Content-Type': contentType || 'image/png',
+      'x-upsert': 'true',
+    },
+    body: bytes,
+  });
+  if (!upRes.ok) throw new Error(`upload reference ${upRes.status}: ${await upRes.text()}`);
+  const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/annotation-shots/${path}`;
+  await updateAnnotation(annotationId, { reference_image_url: publicUrl });
+  const prevPath = shotPathFromUrl(prevUrl);
+  if (prevPath && prevPath !== path) deleteShotPath(prevPath).catch(() => {});
+  return publicUrl;
+}
+
 // ---------- device emulation (DevTools-style, via chrome.debugger) ----------
 const PROTOCOL = '1.3';
 const MOBILE = { width: 390, height: 844, deviceScaleFactor: 3, mobile: true };
@@ -551,6 +576,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
             position_y: msg.position_y,
             author: msg.author || null,
             breakpoint: msg.breakpoint || null,
+            reference_note: msg.reference_note || null,
           });
           sendResponse({ ok: true, annotation });
           break;
@@ -618,6 +644,18 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         case 'DELETE_SHOT': {
           await deleteShotPath(shotPathFromUrl(msg.url));
           sendResponse({ ok: true });
+          break;
+        }
+        case 'UPLOAD_REFERENCE': {
+          const url = await uploadReference(
+            msg.session_id,
+            msg.annotation_id,
+            msg.base64,
+            msg.content_type,
+            msg.ext,
+            msg.prev_url
+          );
+          sendResponse({ ok: true, reference_image_url: url });
           break;
         }
         case 'FETCH_IMAGE': {

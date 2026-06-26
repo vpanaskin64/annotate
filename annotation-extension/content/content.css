@@ -134,6 +134,40 @@ body.ann-capturing .ann-pin--selected .ann-pin__circle {
   background: var(--ann-accent);
   flex: 0 0 auto;
 }
+.ann-toolbar__freeze {
+  appearance: none;
+  border: 0;
+  cursor: pointer;
+  font-family: var(--ann-font);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.14);
+  padding: 5px 11px;
+  border-radius: var(--ann-radius-pill);
+  flex: 0 0 auto;
+}
+.ann-toolbar__freeze:hover {
+  background: rgba(255, 255, 255, 0.26);
+}
+.ann-toolbar__freeze--on {
+  background: var(--ann-accent);
+  color: #fff;
+}
+/* Pulse the status dot while frozen so the locked state is unmistakable. */
+body.ann-frozen .ann-toolbar__dot {
+  animation: ann-freeze-pulse 1.2s ease-in-out infinite;
+}
+@keyframes ann-freeze-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
 
 /* Cards/menus are promoted to the browser top layer via the Popover API so
    they sit above site modals. Neutralize the UA popover defaults (auto-centering
@@ -162,8 +196,14 @@ body.ann-capturing .ann-pin--selected .ann-pin__circle {
   font-family: var(--ann-font);
   color: var(--ann-text-primary);
   overflow: hidden;
+  /* Grow to fit content; only cap (and scroll inside) when it would exceed the
+     viewport. The header + composer stay put; the thread/body is the scroll area. */
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 24px);
 }
 .ann-card__header {
+  flex: 0 0 auto;
   height: 40px;
   display: flex;
   align-items: center;
@@ -235,11 +275,15 @@ body.ann-capturing .ann-pin--selected .ann-pin__circle {
   height: 1px;
   width: 100%;
   background: var(--ann-border-subtle);
+  flex: 0 0 auto;
 }
 
 /* ===== Thread ===== */
 .ann-card__thread {
-  max-height: 320px;
+  /* Flex child of the card: grows with content, scrolls only once the card hits
+     its viewport-height cap. No fixed max-height, so nothing is hidden early. */
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
 }
 .ann-msg {
@@ -478,6 +522,7 @@ body.ann-capturing .ann-pin--selected .ann-pin__circle {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  flex: 0 0 auto;
 }
 .ann-composer__input {
   width: 100%;
@@ -559,6 +604,10 @@ body.ann-capturing .ann-pin--selected .ann-pin__circle {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  /* Scroll the compose body (not the whole card) if it would exceed the viewport. */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 .ann-compose-body .ann-composer__input {
   border: none;
@@ -731,7 +780,150 @@ body.ann-capturing .ann-pin--selected .ann-pin__circle {
 .ann-composer__name:focus,
 .ann-composer__title:focus,
 .ann-compose-body .ann-composer__input:focus,
-.ann-edit__input:focus {
+.ann-edit__input:focus,
+.ann-ref__note:focus {
   outline: none;
   background: #e9e9e9;
+}
+
+/* ===== Reference field (compose + edit) ===== */
+.ann-ref {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ann-ref--compact {
+  margin-top: 8px;
+}
+.ann-ref__label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--ann-text-tertiary);
+}
+.ann-ref__drop {
+  width: 100%;
+  border: 1px dashed var(--ann-border);
+  border-radius: 8px;
+  background: #f8f8f8;
+  padding: 0;
+  cursor: pointer;
+  font-family: var(--ann-font);
+  color: var(--ann-text-secondary);
+  overflow: hidden;
+  display: block;
+}
+.ann-ref__drop:hover {
+  background: #f1f1f1;
+  border-color: var(--ann-accent);
+}
+.ann-ref__drop.is-dragover {
+  background: var(--ann-accent-subtle);
+  border-color: var(--ann-accent);
+  border-style: solid;
+}
+.ann-ref__drop.is-dragover .ann-ref__empty {
+  color: var(--ann-accent);
+}
+.ann-ref__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px 12px;
+  font-size: 13px;
+}
+.ann-ref__empty svg {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+.ann-ref__preview {
+  position: relative;
+  display: block;
+  line-height: 0;
+}
+.ann-ref__preview img {
+  width: 100%;
+  height: auto;
+  display: block;
+  max-height: 180px;
+  object-fit: cover;
+  object-position: top;
+}
+.ann-ref__remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.ann-ref__remove svg {
+  width: 12px;
+  height: 12px;
+}
+.ann-ref__remove svg path {
+  stroke: #fff;
+  stroke-opacity: 1;
+}
+.ann-ref__note {
+  width: 100%;
+  border: none;
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 14px;
+  line-height: 1.5;
+  font-family: var(--ann-font);
+  color: var(--ann-text-primary);
+  background: #f8f8f8;
+  box-sizing: border-box;
+  resize: none;
+}
+.ann-ref__note::placeholder {
+  color: var(--ann-text-tertiary);
+}
+
+/* ===== Reference display (thread card) ===== */
+.ann-msg__ref {
+  margin-top: 12px;
+  padding: 10px;
+  border-radius: 10px;
+  background: var(--ann-accent-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ann-msg__ref-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--ann-accent);
+}
+.ann-msg__ref-img {
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--ann-border-subtle);
+  cursor: zoom-in;
+  line-height: 0;
+}
+.ann-msg__ref-img img {
+  width: 100%;
+  height: auto;
+  display: block;
+  max-height: 180px;
+  object-fit: cover;
+  object-position: top;
+}
+.ann-msg__ref-note {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ann-text-primary);
 }

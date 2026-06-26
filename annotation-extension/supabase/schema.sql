@@ -30,6 +30,11 @@ create table annotations (
   resolved boolean default false,
   breakpoint text,
   screenshot_url text,
+  -- Reference: an image of how the element SHOULD look, plus a note describing
+  -- it. The image lives in the same `annotation-shots` Storage bucket as
+  -- screenshots. Added by migration-004.
+  reference_image_url text,
+  reference_note text,
   created_at timestamptz default now()
 );
 
